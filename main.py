@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 
 from dotenv import load_dotenv
 from google import genai
@@ -7,6 +8,7 @@ from google.genai import types
 
 from prompts import system_prompt
 from call_function import available_functions, call_function
+from config import MAXIMUM_ITERATION
 
 
 def main():
@@ -29,7 +31,19 @@ def main():
     if args.verbose:
         print(f"User prompt: {user_prompt}")
 
-    generate_content(client, messages, args.verbose)
+    for i in range(MAXIMUM_ITERATION):
+        try:
+            final_result = generate_content(client, messages, args.verbose)
+            if final_result:
+                print("Final result:")
+                print(final_result)
+                return
+        except Exception as e:
+            print(f"Error: {e}")
+
+    print(f"Max iteration {MAXIMUM_ITERATION} reached")
+    sys.exit(1)
+
 
 
 def generate_content(client, messages, verbose):
@@ -48,12 +62,13 @@ def generate_content(client, messages, verbose):
         print(f"Prompt tokens: {response.usage_metadata.prompt_token_count}")
         print(f"Response tokens: {response.usage_metadata.candidates_token_count}")
 
-    if response.function_calls:
-        for call in response.function_calls:
-            print(f"Calling function: {call.name}({call.args})")
-    else:
-        print("Response:")
-        print(response.text)
+    if response.candidates:
+        for candidate in response.candidates:
+            if candidate.content:
+                messages.append(candidate.content)
+
+    if not response.function_calls:
+        return response.text
 
     function_results = []
     for call in response.function_calls:
@@ -66,8 +81,9 @@ def generate_content(client, messages, verbose):
         
         if verbose:
             print(f"-> {result.parts[0].function_response.response}")
-    function_results.append(result.parts[0])
+        function_results.append(result.parts[0])
 
+    messages.append(types.Content(role="user", parts=function_results))
 
 if __name__ == "__main__":
     main()
